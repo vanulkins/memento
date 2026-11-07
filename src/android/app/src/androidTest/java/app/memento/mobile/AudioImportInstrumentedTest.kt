@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -41,8 +42,8 @@ class AudioImportInstrumentedTest {
     fun diarizationSeparatesMultipleVoices() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val source = File(context.filesDir, "diar-test.wav")
-        assertTrue("Push diar-test.wav into target files before this diagnostic test", source.isFile)
-        assertTrue("Diarization model is not installed", MementoApp.diarization.ready())
+        assumeTrue("Push diar-test.wav into target files before this diagnostic test", source.isFile)
+        assumeTrue("Diarization model is not installed", MementoApp.diarization.ready())
         val turns = MementoApp.diarization.diarize(source) { }
         val speakers = turns.map { it.speaker }.distinct()
         android.util.Log.i("MEMENTO_TEST", "turns=$turns speakers=$speakers")
@@ -61,16 +62,17 @@ class AudioImportInstrumentedTest {
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         ) as MainActivity
         try {
+            val sourceLength = source.length()
             val bridge = Bridge(activity)
             val resolved = bridge.sourceFile(JSONObject().put("sourcePath", source.absolutePath))
             assertNotNull(resolved)
             val durable = bridge.durableImportSource(resolved!!)
             assertTrue(durable.isFile)
-            assertEquals(source.length(), durable.length())
+            assertEquals(sourceLength, durable.length())
 
             // The bridge makes its durable job copy before returning, so the picker
             // cache may disappear immediately without breaking the background import.
-            assertTrue(source.delete())
+            if (source.exists()) assertTrue(source.delete())
             assertFalse(source.exists())
             assertTrue(durable.isFile)
             assertTrue(AudioDecoder.inspect(durable).durationSeconds > 0.2)

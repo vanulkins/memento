@@ -39,7 +39,7 @@ import androidx.core.content.ContextCompat
 import java.io.File
 import org.json.JSONObject
 
-private const val APP_WEB_VERSION = "34"
+private const val APP_WEB_VERSION = "35"
 
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
@@ -70,7 +70,10 @@ class MainActivity : AppCompatActivity() {
         try {
             buildUI()
             MementoApp.models.events.clear()
-            MementoApp.models.events.add { e, p -> fireEvent(e, p) }
+            MementoApp.models.events.add { e, p ->
+                fireEvent(e, p)
+                if (e == "gigaam-ready") bridge.resumePendingProcessing()
+            }
             requestNotifAndMic()
             val prevCrash = MementoApp.takeLastCrash()
             if (prevCrash != null) note("CRASH on previous launch:\n" + prevCrash)

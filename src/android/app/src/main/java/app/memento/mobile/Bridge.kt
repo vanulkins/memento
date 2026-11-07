@@ -92,6 +92,15 @@ class Bridge(private val act: MainActivity) {
         }.apply { name = "meeting-summary-$id"; isDaemon = true; start() }
     }
 
+    private fun persistRetranscriptionJob(id: String, audio: File, deleteAfter: Boolean) {
+        val job = JSONObject().put("meeting_id", id).put("audio_path", audio.absolutePath)
+            .put("delete_after", deleteAfter).put("saved_at", System.currentTimeMillis())
+        if (!MementoApp.prefs.setSync(processingKey(id), job.toString())) {
+            throw IllegalStateException("Не удалось сохранить задание обработки")
+        }
+        MementoApp.db.setMeetingStatus(id, "processing")
+    }
+
     fun resumePendingProcessing() {
         MementoApp.prefs.keys().filter { it.startsWith("import_job:") }.forEach { key ->
             val job = runCatching { JSONObject(MementoApp.prefs.get(key).orEmpty()) }.getOrNull()
@@ -134,12 +143,11 @@ class Bridge(private val act: MainActivity) {
 
     private fun launchRetranscription(id: String, audio: File, deleteAfter: Boolean, resumed: Boolean = false) {
         if (!activeProcessing.add(id)) return
-        MementoApp.db.setMeetingStatus(id, "processing")
-        val job = JSONObject().put("meeting_id", id).put("audio_path", audio.absolutePath)
-            .put("delete_after", deleteAfter).put("saved_at", System.currentTimeMillis())
-        if (!MementoApp.prefs.setSync(processingKey(id), job.toString())) {
+        try {
+            persistRetranscriptionJob(id, audio, deleteAfter)
+        } catch (e: Throwable) {
             activeProcessing.remove(id)
-            throw IllegalStateException("Не удалось сохранить задание обработки")
+            throw e
         }
         ContextCompat.startForegroundService(app, Intent(app, ProcessingService::class.java))
         MementoApp.asr.cancelFlag.set(false)
@@ -511,11 +519,13 @@ class Bridge(private val act: MainActivity) {
                 val audio = File(path)
                 MementoApp.db.saveMeeting(id, stoppedName, if (audio.exists()) path else "", dur, "")
                 finalizations[sessionId] = JSONObject().put("meeting_id", id).put("meeting_name", stoppedName)
-                if (MementoApp.asr.ready()) {
-                    startRetranscription(JSONObject().put("meeting_id", id).put("meetingId", id)
-                        .put("meetingFolderPath", path)
-                        .put("deleteAudioAfter", MementoApp.prefs.get("rec_auto_save") == "0"))
-                }
+                // Always hand the saved recording to the durable processing queue. The old
+                // readiness guard silently dropped the only processing request when model
+                // discovery had not completed yet, leaving the meeting without a transcript
+                // or summary forever.
+                startRetranscription(JSONObject().put("meeting_id", id).put("meetingId", id)
+                    .put("meetingFolderPath", path)
+                    .put("deleteAudioAfter", MementoApp.prefs.get("rec_auto_save") == "0"))
             }
             fire("recording-stopped", JSONObject()
                 .put("meeting_id", id)
@@ -776,8 +786,9 @@ class Bridge(private val act: MainActivity) {
             val saved = MementoApp.db.summary(id)
             val hasTranscript = MementoApp.db.transcriptCount(id) > 0
             val pendingJob = runCatching { JSONObject(MementoApp.prefs.get(summaryKey(id)).orEmpty()) }.getOrNull()
+            val transcriptionJob = MementoApp.prefs.get(processingKey(id))?.takeIf { it.isNotBlank() }
             val active = activeProcessing.contains(id)
-            val pending = pendingJob != null || active
+            val pending = pendingJob != null || transcriptionJob != null || active
             if (saved == null && hasTranscript && !active &&
                 (pendingJob == null || pendingJob.optLong("next_retry_at", 0L) <= System.currentTimeMillis())) {
                 scheduleAutomaticSummary(id, pendingJob?.optBoolean("replace_title", false) ?: false)
@@ -967,7 +978,7 @@ class Bridge(private val act: MainActivity) {
         "open_system_settings" -> ok(JSONObject.NULL)
         "update_location" -> ok(JSONObject.NULL)
         "log_update_failure", "resolve_managed_defaults_migration", "report_auto_listening_start" -> ok(JSONObject.NULL)
-        "plugin:app|version" -> ok("1.0.13")
+        "plugin:app|version" -> ok(BuildConfig.VERSION_NAME)
         "plugin:process|restart" -> ok(JSONObject.NULL)
 
         else -> {
@@ -1005,7 +1016,7 @@ class Bridge(private val act: MainActivity) {
             "plugin:store|values", "plugin:store|entries" -> JSONArray()
             "plugin:store|length" -> p.keys().size
             "plugin:store|clear", "plugin:store|delete", "plugin:store|reset", "plugin:store|save", "plugin:store|reload" -> JSONObject.NULL
-            "plugin:app|version" -> "1.0.13"
+            "plugin:app|version" -> BuildConfig.VERSION_NAME
             else -> JSONObject.NULL
         }
     }
@@ -1020,7 +1031,7 @@ class Bridge(private val act: MainActivity) {
                     .put("include_logs", submission.optBoolean("include_logs", false))
                     .put("submission_id", submission.optString("submission_id"))
                     .put("platform", "android")
-                    .put("app_version", "1.0.13")
+                    .put("app_version", BuildConfig.VERSION_NAME)
                 val logs = submission.optString("logs")
                 if (logs.isNotBlank()) payload.put("logs", logs)
                 postFormspree(payload)
@@ -1331,12 +1342,14 @@ header{display:flex;justify-content:space-between;gap:16px}time{color:#777;font-
             fire("retranscription-error", JSONObject().put("meeting_id", id).put("meetingId", id).put("error", "Аудиофайл встречи не найден"))
             return ok(JSONObject.NULL)
         }
+        val deleteAfter = args.optBoolean("deleteAudioAfter", false)
         if (!MementoApp.asr.ready()) {
-            val payload = JSONObject()
-                .put("meeting_id", id)
-                .put("meetingId", id)
-                .put("error", "Модель GigaAM v3 не загружена: скачайте её в настройках")
-            fire("retranscription-error", payload)
+            // Keep the job instead of losing it. It is resumed on the next activity start or
+            // immediately after the speech model finishes downloading.
+            persistRetranscriptionJob(id, audio, deleteAfter)
+            ContextCompat.startForegroundService(app, Intent(app, ProcessingService::class.java))
+            fire("retranscription-progress", JSONObject().put("meeting_id", id).put("meetingId", id)
+                .put("stage", "waiting_for_model").put("progress", 0.0))
             return ok(JSONObject.NULL)
         }
         val peak = wavPeak(audio)
@@ -1348,7 +1361,6 @@ header{display:flex;justify-content:space-between;gap:16px}time{color:#777;font-
             fire("retranscription-error", payload)
             return ok(JSONObject.NULL)
         }
-        val deleteAfter = args.optBoolean("deleteAudioAfter", false)
         launchRetranscription(id, audio, deleteAfter)
         return ok(JSONObject.NULL)
     }
