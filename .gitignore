@@ -1,0 +1,31 @@
+# Secrets and local configuration
+.env
+local.properties
+*.key
+*.pem
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Build output and caches
+build/
+dist/
+out/
+.gradle/
+.kotlin/
+node_modules/
+
+# Generated models and recordings
+*.onnx
+*.onnx_data
+*.wav
+*.mp3
+

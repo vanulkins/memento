@@ -1,0 +1,20 @@
+[Unit]
+Description=Memento AI Gateway
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/memento-ai
+EnvironmentFile=/etc/memento-ai.env
+ExecStart=/usr/bin/node /opt/memento-ai/server.mjs
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
