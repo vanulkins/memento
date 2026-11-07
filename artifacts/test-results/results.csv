@@ -1,0 +1,6 @@
+test_id,environment,input,duration_seconds,expected_speakers,detected_speakers,segments,result,notes
+real-dialogue-import,Android_15_emulator,Easy_Russian_real_dialogue,300,2,2,22,pass,system_picker_and_full_pipeline
+speaker-persistence,Android_15_emulator,stored_meeting,300,2,2,22,pass,11_segments_per_speaker_after_restart
+summary-generation,Android_15_emulator,stored_transcript,300,2,2,22,pass,title_description_summary_and_participants_saved
+apk-build,Apple_M4_macOS_26.5.2,Memento_1.0.13,0,0,0,0,pass,arm64_v8a_minSdk_26_targetSdk_35
+promo-decode,Apple_M4_macOS_26.5.2,Memento-demo.mp4,31.083333,0,0,0,pass,h264_1920x1920_60fps_1865_frames
