@@ -125,9 +125,9 @@ class Bridge(private val act: MainActivity) {
             val job = runCatching { JSONObject(MementoApp.prefs.get(key).orEmpty()) }.getOrNull() ?: return@forEach
             val id = job.optString("meeting_id")
             val audio = File(job.optString("audio_path"))
-            if (id.isNotBlank() && audio.isFile) {
+            if (id.isNotBlank() && audio.isFile && MementoApp.asr.ready()) {
                 launchRetranscription(id, audio, job.optBoolean("delete_after", false), resumed = true)
-            } else {
+            } else if (id.isBlank() || !audio.isFile) {
                 MementoApp.prefs.delete(key)
             }
         }
@@ -915,7 +915,7 @@ class Bridge(private val act: MainActivity) {
         "rag_get_latest_session" -> {
             val input = args.optJSONObject("input") ?: JSONObject()
             val scope = input.optString("scope", "archive")
-            val meetingId = input.optString("meeting_id")
+            val meetingId = if (input.isNull("meeting_id")) "" else input.optString("meeting_id")
             val key = if (scope == "meeting" && meetingId.isNotEmpty()) "meeting:$meetingId" else "archive"
             if (key == "archive") MementoApp.db.ensureKnowledgeBaseSession()
             ok(MementoApp.db.latestChatSession(key) ?: JSONObject.NULL)
@@ -923,7 +923,7 @@ class Bridge(private val act: MainActivity) {
         "rag_ask" -> {
             val input = args.optJSONObject("input") ?: JSONObject()
             val query = input.optString("query").trim()
-            val meetingId = input.optString("meeting_id")
+            val meetingId = if (input.isNull("meeting_id")) "" else input.optString("meeting_id")
             val scope = input.optString("scope", "archive")
             val sessionId = if (scope == "meeting" && meetingId.isNotEmpty())
                 MementoApp.db.ensureSession("meeting:$meetingId", "Чат встречи")
