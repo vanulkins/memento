@@ -28,4 +28,5 @@ node_modules/
 *.onnx_data
 *.wav
 *.mp3
+src/android/app/src/main/assets/models/bundled/
 

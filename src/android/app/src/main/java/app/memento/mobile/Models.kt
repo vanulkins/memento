@@ -12,8 +12,8 @@ import java.util.concurrent.Executors
 
 /**
  * Local models for on-device speech recognition (GigaAM v3) and diarization (Nemotron 3).
- * Small constant tensors (mel filterbanks, window, silence embedding, meta) ship inside the APK
- * and are copied from assets; only the large ONNX weights are downloaded.
+ * All runtime weights ship inside the APK and are copied from assets on first use.
+ * No network access is required to prepare speech recognition or diarization.
  */
 class Models(private val ctx: Context) {
     private val exec = Executors.newFixedThreadPool(2)
@@ -60,10 +60,10 @@ class Models(private val ctx: Context) {
     private val GIGA_RNNT_INT8 = Variant(
         "e2e-rnnt-int8-cpu", "GigaAM Duo · Русский + английский · CPU", "gigaam-v3/e2e-rnnt-int8",
         listOf(
-            Spec("v3_e2e_rnnt_vocab.txt", 13354L, "39abae20e692998290c574e606f11a9edef2902a1995463fcff63d1490cf22b7", giga("v3_e2e_rnnt_vocab.txt")),
-            Spec("v3_e2e_rnnt_encoder.int8.onnx", 224570477L, null, giga("v3_e2e_rnnt_encoder.int8.onnx")),
-            Spec("v3_e2e_rnnt_decoder.int8.onnx", 1159170L, null, giga("v3_e2e_rnnt_decoder.int8.onnx")),
-            Spec("v3_e2e_rnnt_joint.int8.onnx", 687791L, null, giga("v3_e2e_rnnt_joint.int8.onnx")),
+            Spec("v3_e2e_rnnt_vocab.txt", 13354L, "39abae20e692998290c574e606f11a9edef2902a1995463fcff63d1490cf22b7", emptyList(), "models/bundled/gigaam/v3_e2e_rnnt_vocab.txt"),
+            Spec("v3_e2e_rnnt_encoder.int8.onnx", 224570477L, null, emptyList(), "models/bundled/gigaam/v3_e2e_rnnt_encoder.int8.onnx"),
+            Spec("v3_e2e_rnnt_decoder.int8.onnx", 1159170L, null, emptyList(), "models/bundled/gigaam/v3_e2e_rnnt_decoder.int8.onnx"),
+            Spec("v3_e2e_rnnt_joint.int8.onnx", 687791L, null, emptyList(), "models/bundled/gigaam/v3_e2e_rnnt_joint.int8.onnx"),
             Spec("mel_fbank_v3.f32", 41216L, null, emptyList(), "models/mel_fbank_v3.f32"),
             Spec("window_v3.f32", 1280L, null, emptyList(), "models/window_v3.f32")
         ),
@@ -102,8 +102,8 @@ class Models(private val ctx: Context) {
     private val NEMO = Variant(
         "nemotron", "Nemotron 3 diarization", "nemotron",
         listOf(
-            Spec("model.onnx", 303466L, null, listOf("$hfNemo/onnx/model.onnx")),
-            Spec("model.onnx_data", 398184448L, null, listOf("$hfNemo/onnx/model.onnx_data")),
+            Spec("model.onnx", 303466L, null, emptyList(), "models/bundled/nemotron/model.onnx"),
+            Spec("model.onnx_data", 398184448L, null, emptyList(), "models/bundled/nemotron/model.onnx_data"),
             Spec("mel_fbank.f32", 131584L, null, emptyList(), "models/mel_fbank.f32"),
             Spec("window.f32", 1600L, null, emptyList(), "models/window.f32"),
             Spec("sil_emb.f32", 2048L, null, emptyList(), "models/sil_emb.f32"),
@@ -149,7 +149,12 @@ class Models(private val ctx: Context) {
             val out = File(d, s.name)
             if (out.isFile && (s.size <= 0 || out.length() == s.size)) continue
             try {
-                ctx.assets.open(asset).use { input -> out.outputStream().use { input.copyTo(it) } }
+                val part = File(d, s.name + ".bundled")
+                if (part.exists()) part.delete()
+                ctx.assets.open(asset).use { input -> part.outputStream().buffered().use { input.copyTo(it, 1024 * 1024) } }
+                require(s.size <= 0 || part.length() == s.size) { "bundled size mismatch for ${s.name}" }
+                if (out.exists()) out.delete()
+                require(part.renameTo(out)) { "bundled rename failed for ${s.name}" }
             } catch (e: Throwable) {
                 android.util.Log.e("MEMENTO", "bundled asset failed: " + asset, e)
             }
@@ -158,7 +163,10 @@ class Models(private val ctx: Context) {
 
     fun present(v: Variant): Boolean {
         ensureBundled(v)
-        return v.files.all { File(dir(v), it.name).isFile }
+        return v.files.all {
+            val file = File(dir(v), it.name)
+            file.isFile && (it.size <= 0 || file.length() == it.size)
+        }
     }
 
     fun selected(): String {
@@ -185,7 +193,7 @@ class Models(private val ctx: Context) {
                     .put("label", v.label)
                     .put("size_mb", v.sizeMb)
                     .put("present", present(v))
-                    .put("downloadable", true)
+                    .put("downloadable", false)
                     .put("bilingual", true)
                     .put("neural_engine", v.id == GIGA_RNNT_NNAPI.id)
             )
@@ -197,15 +205,15 @@ class Models(private val ctx: Context) {
             .put("loaded", present(selectedVariant))
             .put("loaded_variant", if (present(selectedVariant)) selectedVariant.id else JSONObject.NULL)
             .put("neural_engine_supported", true)
-            .put("downloading", downloadingId == selectedVariant.id)
-            .put("download_progress", if (downloadingId == selectedVariant.id) progress else 0.0)
-            .put("downloaded_mb", downloadedMb)
+            .put("downloading", false)
+            .put("download_progress", if (present(selectedVariant)) 1.0 else 0.0)
+            .put("downloaded_mb", if (present(selectedVariant)) selectedVariant.sizeMb else 0.0)
     }
 
     fun diarStatusJson(): JSONObject = JSONObject()
         .put("available", present(NEMO))
-        .put("download_mb", NEMO.sizeMb)
-        .put("downloading", downloadingId == NEMO.id)
+        .put("download_mb", 0)
+        .put("downloading", false)
 
     fun select(id: String) {
         require(variant(id) != null) { "Неизвестный вариант GigaAM: $id" }
@@ -214,6 +222,14 @@ class Models(private val ctx: Context) {
     }
 
     fun download(v: Variant) {
+        if (v.files.all { it.asset != null }) {
+            exec.submit {
+                ensureBundled(v)
+                val event = if (v === NEMO) "diarization-ready" else "gigaam-ready"
+                if (present(v)) fire(event, JSONObject().put("id", v.id))
+            }
+            return
+        }
         if (downloadingId == v.id) return
         AppLog.info("models::download", "Starting ${if (v === NEMO) "speaker recognition" else "transcription"} model download")
         downloadingId = v.id

@@ -16,8 +16,8 @@ android {
         applicationId = "app.memento.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 114
-        versionName = "1.0.14"
+        versionCode = 115
+        versionName = "1.0.14.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
             "String",
@@ -49,6 +49,9 @@ android {
     kotlinOptions { jvmTarget = "17" }
     packaging {
         resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
+    }
+    androidResources {
+        noCompress += listOf("onnx", "onnx_data", "f32")
     }
     defaultConfig {
         ndk { abiFilters += listOf("arm64-v8a") }

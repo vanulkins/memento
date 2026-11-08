@@ -17,10 +17,10 @@ Memento — Android-приложение для локальной записи 
 
 ## Быстрый старт
 
-1. Скачайте [`Memento.apk`](Memento.apk) или APK из GitHub Releases.
+1. Скачайте [`Memento.apk`](https://github.com/vanulkins/memento/releases/download/v1.0.14.1/Memento.apk) из GitHub Releases.
 2. Разрешите установку приложений из браузера или файлового менеджера.
 3. Установите APK на Android 8.0 или новее.
-4. При первом запуске дождитесь загрузки моделей распознавания и диаризации.
+4. При первом запуске приложение проверит и распакует встроенные модели. Интернет для этого не нужен.
 5. Нажмите «Записать встречу» или выберите «Загрузить встречу».
 
 Для записи системного звука Android покажет отдельное системное подтверждение. Облачные функции требуют интернета; запись, импорт, транскрипция и диаризация выполняются локально.
@@ -35,6 +35,7 @@ Memento — Android-приложение для локальной записи 
 cd src/android
 cp ../../config/example.env ../../.env
 set -a && source ../../.env && set +a
+../../scripts/prepare-offline-models.sh
 gradle :app:assembleDebug
 ```
 
@@ -53,7 +54,6 @@ gradle :app:assembleDebug
 
 ```text
 .
-├── Memento.apk
 ├── artifacts
 │   ├── demo
 │   └── test-results
